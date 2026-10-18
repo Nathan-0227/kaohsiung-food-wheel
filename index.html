@@ -172,6 +172,8 @@ fieldset:disabled .chip span{opacity:.5;cursor:not-allowed}
 }
 .map-banner button{background:none;border:0;color:var(--yellow);text-decoration:underline;padding:0}
 .map-panel.picking #map{cursor:crosshair}
+/* 把淺色的 OSM 底圖轉成深色夜市風；只套用在底圖，標記不受影響 */
+.leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.9) contrast(.9) saturate(.6)}
 .leaflet-popup-content-wrapper,.leaflet-popup-tip{background:#1e1a38;color:var(--text);border:1px solid var(--line)}
 .leaflet-popup-content{margin:10px 14px;font-family:inherit}
 .pop-name{font-weight:900;font-size:15px;margin-bottom:2px}
@@ -314,7 +316,7 @@ footer{max-width:1280px;margin:0 auto;padding:4px 16px 28px;color:var(--muted);f
 
 <footer>
   店家資料整理自 2025–2026 年公開美食報導與米其林必比登名單；價位為約略估計，地圖標記為大略位置，營業時間與確切位置請以導航與店家公告為準。<br>
-  地圖：© OpenStreetMap contributors © CARTO｜Vibe Coding 作業
+  地圖：© OpenStreetMap contributors｜Vibe Coding 作業
 </footer>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -619,9 +621,10 @@ function initMap(){
     return;
   }
   map=L.map("map",{zoomControl:true}).setView([22.640,120.300],13);
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",{
-    maxZoom:19, subdomains:"abcd",
-    attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+  // OpenStreetMap 官方圖磚：免費、免 API key；深色效果用 CSS 濾鏡達成（見 .leaflet-tile-pane）
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{
+    maxZoom:19,
+    attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
   }).addTo(map);
   markerLayer=L.layerGroup().addTo(map);
   map.on("click",e=>{ if(state.picking) setPick(e.latlng); });
