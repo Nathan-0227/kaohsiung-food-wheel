@@ -4,7 +4,7 @@
 
 選不出來吃什麼，就交給轉盤吧！先用篩選條件縮小範圍，轉動轉盤隨機決定要吃哪家高雄餐廳，結果會同時顯示在地圖上，並可以一鍵導航。
 
-🔗 **線上試玩**：https://你的帳號.github.io/kaohsiung-food-wheel/
+🔗 **線上試玩**：https://nathan-0227.github.io/kaohsiung-food-wheel/index.html
 
 ![網站截圖](screenshot.png)
 
