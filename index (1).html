@@ -1,0 +1,873 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>高雄今天吃什麼？</title>
+<meta name="description" content="轉一下轉盤，決定今天在高雄吃什麼。可依類型、價位、行政區、距離篩選，並在地圖上導航。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{
+  --bg:#0c0a18; --panel:#16132a; --panel-2:#1e1a38; --line:#2e2852;
+  --text:#f3efff; --muted:#a59fc4;
+  --red:#ff3b5c; --orange:#ff8a1f; --yellow:#ffd23f; --cyan:#2de2e6; --pink:#ff4fd8;
+  --radius:14px;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0}
+body{
+  background:
+    radial-gradient(1200px 500px at 10% -10%, #3a0f3a55, transparent 60%),
+    radial-gradient(900px 500px at 110% 0%, #0f3a4a55, transparent 60%),
+    var(--bg);
+  color:var(--text);
+  font-family:"Noto Sans TC",system-ui,-apple-system,"PingFang TC","Microsoft JhengHei",sans-serif;
+  line-height:1.5; min-height:100vh;
+}
+button,input,select{font:inherit}
+button{cursor:pointer}
+button:disabled{cursor:not-allowed;opacity:.45}
+
+/* ---------- Header ---------- */
+header{padding:18px 16px 8px;text-align:center}
+.title{
+  margin:0;font-size:clamp(28px,6vw,44px);font-weight:900;letter-spacing:.06em;
+  color:#fff;
+  text-shadow:0 0 4px #fff,0 0 12px var(--red),0 0 24px var(--red),0 0 44px var(--orange);
+  animation:flicker 6s infinite;
+}
+.title .q{color:var(--yellow);text-shadow:0 0 4px #fff,0 0 14px var(--yellow),0 0 30px var(--orange)}
+@keyframes flicker{0%,92%,100%{opacity:1}93%{opacity:.55}94%{opacity:1}96%{opacity:.7}97%{opacity:1}}
+.subtitle{margin:4px 0 0;color:var(--muted);font-size:14px}
+
+/* ---------- Layout ---------- */
+.layout{
+  max-width:1280px;margin:0 auto;padding:12px 16px 24px;
+  display:grid;gap:16px;
+  grid-template-columns:minmax(0,1fr);
+  grid-template-areas:"filters" "wheel" "result" "map" "mine";
+}
+@media (min-width:900px){
+  .layout{
+    grid-template-columns:minmax(360px,440px) minmax(0,1fr);
+    grid-template-areas:"filters map" "wheel map" "result map" "mine map";
+    align-items:start;
+  }
+  .map-panel{position:sticky;top:12px;height:calc(100vh - 24px)}
+}
+.panel{
+  background:linear-gradient(180deg,var(--panel-2),var(--panel));
+  border:1px solid var(--line);border-radius:var(--radius);
+  padding:14px 16px;box-shadow:0 8px 30px #0006;
+}
+.panel h2{margin:0 0 10px;font-size:16px;letter-spacing:.05em;color:var(--yellow)}
+
+/* ---------- Filters ---------- */
+.filters-panel{grid-area:filters}
+.filters-panel summary{
+  list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center;
+  font-weight:700;color:var(--yellow);
+}
+.filters-panel summary::-webkit-details-marker{display:none}
+.filters-panel summary .count{font-size:13px;color:var(--cyan);font-weight:400}
+.filters-panel summary .chev{transition:transform .2s}
+.filters-panel[open] summary .chev{transform:rotate(180deg)}
+fieldset{border:0;margin:0;padding:0;min-width:0}
+.fgroup{margin-top:12px}
+.fgroup .label{font-size:13px;color:var(--muted);margin-bottom:6px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{position:relative}
+.chip input{position:absolute;opacity:0;pointer-events:none}
+.chip span{
+  display:inline-block;padding:5px 11px;border-radius:999px;font-size:14px;
+  border:1px solid var(--line);background:#0006;color:var(--text);
+  transition:all .15s;user-select:none;cursor:pointer;
+}
+.chip input:checked + span{
+  border-color:var(--orange);color:#fff;background:#ff8a1f33;
+  box-shadow:0 0 10px #ff8a1f88, inset 0 0 6px #ff8a1f55;
+}
+.chip input:focus-visible + span{outline:2px solid var(--cyan);outline-offset:2px}
+fieldset:disabled .chip span{opacity:.5;cursor:not-allowed}
+.loc-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.loc-msg{font-size:13px;color:var(--muted);margin-top:6px}
+.loc-msg.warn{color:var(--yellow)}
+.btn-small{
+  padding:5px 12px;border-radius:999px;border:1px solid var(--cyan);
+  background:#2de2e61a;color:var(--cyan);font-size:14px;
+}
+.btn-small:hover:not(:disabled){background:#2de2e633}
+.filter-actions{margin-top:12px;display:flex;justify-content:flex-end}
+.link-btn{background:none;border:0;color:var(--muted);text-decoration:underline;font-size:13px;padding:0}
+
+/* ---------- Wheel ---------- */
+.wheel-panel{grid-area:wheel;text-align:center}
+.wheel-wrap{position:relative;width:min(100%,340px);aspect-ratio:1;margin:8px auto 4px}
+.wheel-wrap canvas{width:100%;height:100%;display:block;border-radius:50%;
+  box-shadow:0 0 0 6px #1b1733,0 0 0 8px var(--pink),0 0 30px #ff4fd899,0 0 60px #ff3b5c55;
+  will-change:transform}
+.wheel-wrap.empty canvas{box-shadow:0 0 0 6px #1b1733,0 0 0 8px #555}
+.pointer{
+  position:absolute;left:50%;top:-14px;transform:translateX(-50%);z-index:2;
+  width:0;height:0;border-left:16px solid transparent;border-right:16px solid transparent;
+  border-top:32px solid var(--yellow);filter:drop-shadow(0 0 8px var(--yellow));
+}
+.hub{
+  position:absolute;inset:0;margin:auto;width:58px;height:58px;border-radius:50%;
+  background:radial-gradient(circle at 35% 30%,#fff,#ffd23f 40%,#ff8a1f);
+  box-shadow:0 0 16px var(--yellow);display:grid;place-items:center;
+  font-weight:900;color:#3a1500;font-size:15px;pointer-events:none;
+}
+.wheel-info{font-size:13px;color:var(--muted);min-height:20px}
+.wheel-info.warn{color:var(--yellow)}
+.wheel-btns{display:flex;gap:10px;justify-content:center;margin-top:10px;flex-wrap:wrap}
+.btn-spin{
+  padding:12px 34px;border:0;border-radius:999px;font-size:20px;font-weight:900;letter-spacing:.1em;
+  color:#fff;background:linear-gradient(90deg,var(--red),var(--orange));
+  box-shadow:0 0 18px #ff3b5caa;transition:transform .1s;
+}
+.btn-spin:active:not(:disabled){transform:scale(.96)}
+.btn-ghost{
+  padding:10px 18px;border-radius:999px;border:1px solid var(--line);
+  background:#0006;color:var(--text);font-size:15px;
+}
+.btn-ghost:hover:not(:disabled){border-color:var(--cyan);color:var(--cyan)}
+.excluded-bar{
+  margin-top:10px;font-size:13px;padding:6px 10px;border-radius:10px;
+  background:#ff3b5c1f;border:1px dashed #ff3b5c88;color:#ffc2cd;
+}
+.excluded-bar button{color:var(--yellow)}
+
+/* ---------- Result card ---------- */
+.result-panel{grid-area:result}
+.result-empty{color:var(--muted);text-align:center;padding:10px 0}
+.result-name{font-size:24px;font-weight:900;margin:0;color:#fff;text-shadow:0 0 10px var(--orange)}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.tag{font-size:12px;padding:2px 9px;border-radius:999px;background:#ffffff14;border:1px solid var(--line)}
+.tag.price{color:var(--yellow);border-color:#ffd23f66}
+.tag.dist{color:var(--cyan);border-color:#2de2e666}
+.result-note{margin:4px 0 2px}
+.result-addr{font-size:13px;color:var(--muted);margin:0}
+.result-btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.btn-nav{
+  padding:9px 16px;border-radius:999px;background:var(--cyan);color:#062a2b;
+  font-weight:700;text-decoration:none;border:0;font-size:15px;
+}
+.result-panel.pop{animation:pop .45s ease}
+@keyframes pop{0%{transform:scale(.96);box-shadow:0 0 0 #ff8a1f}50%{box-shadow:0 0 40px #ff8a1f}100%{transform:scale(1)}}
+
+/* ---------- Map ---------- */
+.map-panel{grid-area:map;padding:0;overflow:hidden;position:relative;display:flex;flex-direction:column}
+#map{width:100%;height:60vh;min-height:320px;flex:1;background:#111}
+@media (min-width:900px){#map{height:100%}}
+.map-banner{
+  position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:500;
+  background:#000c;border:1px solid var(--cyan);color:var(--cyan);
+  padding:6px 12px;border-radius:999px;font-size:14px;display:flex;gap:10px;align-items:center;
+  box-shadow:0 0 14px #2de2e688;white-space:nowrap;
+}
+.map-banner button{background:none;border:0;color:var(--yellow);text-decoration:underline;padding:0}
+.map-panel.picking #map{cursor:crosshair}
+.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:#1e1a38;color:var(--text);border:1px solid var(--line)}
+.leaflet-popup-content{margin:10px 14px;font-family:inherit}
+.pop-name{font-weight:900;font-size:15px;margin-bottom:2px}
+.pop-meta{font-size:12px;color:var(--muted)}
+.pop-note{font-size:13px;margin:4px 0}
+.pop-nav{display:inline-block;margin-top:4px;color:var(--cyan)!important;font-weight:700}
+.leaflet-container a.leaflet-popup-close-button{color:var(--muted)}
+.me-dot{width:16px;height:16px;border-radius:50%;background:var(--cyan);border:3px solid #fff;box-shadow:0 0 0 6px #2de2e655}
+
+/* ---------- My stores ---------- */
+.mine-panel{grid-area:mine}
+.mine-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.mine-head h2{margin:0}
+.storage-note{font-size:12px;color:var(--muted);margin:6px 0 0}
+.storage-note.warn{color:var(--yellow)}
+.form{margin-top:12px;display:grid;gap:10px;padding:12px;border-radius:12px;background:#0005;border:1px solid var(--line)}
+.form label{display:grid;gap:4px;font-size:13px;color:var(--muted)}
+.form input,.form select{
+  padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:#0c0a18;color:var(--text);
+}
+.form input:focus,.form select:focus{outline:none;border-color:var(--cyan);box-shadow:0 0 0 2px #2de2e633}
+.form .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.form .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+@media (max-width:420px){.form .row3{grid-template-columns:1fr 1fr}}
+.pick-status{font-size:13px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.pick-status.ok{color:var(--cyan)}
+.pick-status.no{color:var(--yellow)}
+.form-error{color:#ff8fa3;font-size:13px;min-height:1em;margin:0}
+.form-btns{display:flex;gap:8px;justify-content:flex-end}
+.btn-primary{padding:8px 18px;border-radius:999px;border:0;background:var(--orange);color:#2a1100;font-weight:700}
+.mine-list{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:6px}
+.mine-list li{
+  display:flex;justify-content:space-between;align-items:center;gap:8px;
+  padding:8px 10px;border-radius:10px;background:#0004;border:1px solid var(--line);font-size:14px;
+}
+.mine-list .meta{color:var(--muted);font-size:12px}
+.btn-del{background:none;border:1px solid #ff3b5c88;color:#ff8fa3;border-radius:8px;padding:3px 10px;font-size:13px}
+.mine-empty{color:var(--muted);font-size:13px;margin:10px 0 0}
+
+footer{max-width:1280px;margin:0 auto;padding:4px 16px 28px;color:var(--muted);font-size:12px;text-align:center}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+@media (prefers-reduced-motion:reduce){.title{animation:none}}
+</style>
+</head>
+<body>
+<header>
+  <h1 class="title">高雄今天吃什麼<span class="q">？</span></h1>
+  <p class="subtitle">選不出來就交給轉盤吧｜港都夜市霓虹版</p>
+</header>
+
+<main class="layout">
+  <!-- 篩選 -->
+  <details class="panel filters-panel" id="filtersPanel" open>
+    <summary><span>🔍 篩選條件 <span class="count" id="matchCount"></span></span><span class="chev">▾</span></summary>
+    <fieldset id="filterFieldset">
+      <div class="fgroup"><div class="label">類型（可複選）</div><div class="chips" id="fType"></div></div>
+      <div class="fgroup"><div class="label">價位（可複選）</div><div class="chips" id="fPrice"></div></div>
+      <div class="fgroup"><div class="label">行政區（可複選）</div><div class="chips" id="fDistrict"></div></div>
+      <div class="fgroup">
+        <div class="label">離我最近</div>
+        <div class="loc-row">
+          <button type="button" class="btn-small" id="btnLocate">📍 取得我的位置</button>
+          <button type="button" class="btn-small" id="btnSimulate" hidden>🚉 模擬我在高雄車站</button>
+        </div>
+        <div class="chips" id="fDistance" hidden style="margin-top:8px"></div>
+        <div class="loc-msg" id="locMsg">定位後可以依距離篩選，並在結果顯示距離。</div>
+      </div>
+      <div class="filter-actions"><button type="button" class="link-btn" id="btnClearFilters">清除所有篩選</button></div>
+    </fieldset>
+  </details>
+
+  <!-- 轉盤 -->
+  <section class="panel wheel-panel" aria-label="轉盤">
+    <div class="wheel-wrap" id="wheelWrap">
+      <div class="pointer" aria-hidden="true"></div>
+      <canvas id="wheel" width="680" height="680" aria-hidden="true"></canvas>
+      <div class="hub" aria-hidden="true">吃!</div>
+    </div>
+    <div class="wheel-info" id="wheelInfo"></div>
+    <div class="wheel-btns">
+      <button type="button" class="btn-spin" id="btnSpin">🎲 轉一下！</button>
+      <button type="button" class="btn-ghost" id="btnShuffle" hidden>🔀 換一批</button>
+    </div>
+    <div class="excluded-bar" id="excludedBar" hidden>
+      已排除 <b id="excludedCount">0</b> 家，<button type="button" class="link-btn" id="btnRestore">點此還原</button>
+    </div>
+  </section>
+
+  <!-- 結果卡片 -->
+  <section class="panel result-panel" id="resultPanel" aria-live="polite">
+    <div class="result-empty" id="resultEmpty">按下「轉一下」，讓命運決定今天吃什麼 🍜</div>
+    <div id="resultBody" hidden>
+      <h2 class="result-name" id="rName"></h2>
+      <div class="tags" id="rTags"></div>
+      <p class="result-note" id="rNote"></p>
+      <p class="result-addr" id="rAddr"></p>
+      <div class="result-btns">
+        <a class="btn-nav" id="rNav" target="_blank" rel="noopener">🧭 用 Google Maps 導航</a>
+        <button type="button" class="btn-ghost" id="btnAgain">🔁 再轉一次</button>
+        <button type="button" class="btn-ghost" id="btnNope">🙅 不要這家</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 地圖 -->
+  <section class="panel map-panel" id="mapPanel" aria-label="地圖">
+    <div class="map-banner" id="mapBanner" hidden>👆 點地圖選擇店家位置 <button type="button" id="btnCancelPick">取消</button></div>
+    <div id="map"></div>
+  </section>
+
+  <!-- 我的店家 -->
+  <section class="panel mine-panel" id="minePanel">
+    <div class="mine-head">
+      <h2>⭐ 我的口袋名單</h2>
+      <button type="button" class="btn-small" id="btnAdd">＋ 新增店家</button>
+    </div>
+    <p class="storage-note" id="storageNote">自訂的店只存在這個瀏覽器（localStorage），換手機或清除瀏覽資料就會不見。</p>
+
+    <form class="form" id="addForm" hidden novalidate>
+      <div class="pick-status no" id="pickStatus">尚未選擇位置</div>
+      <label>店名＊<input id="inName" maxlength="20" placeholder="例如：巷口那家鍋燒意麵" autocomplete="off"></label>
+      <div class="row3">
+        <label>類型＊<select id="inType"></select></label>
+        <label>價位＊<select id="inPrice"></select></label>
+        <label>行政區＊<select id="inDistrict"></select></label>
+      </div>
+      <label>一句推薦（選填）<input id="inNote" maxlength="30" placeholder="例如：老闆超熱情，記得加辣" autocomplete="off"></label>
+      <p class="form-error" id="formError" role="alert"></p>
+      <div class="form-btns">
+        <button type="button" class="btn-ghost" id="btnFormCancel">取消</button>
+        <button type="submit" class="btn-primary">儲存</button>
+      </div>
+    </form>
+
+    <ul class="mine-list" id="mineList"></ul>
+    <p class="mine-empty" id="mineEmpty">還沒有自訂店家。按「新增店家」，在地圖上點一下就能加入你的私房美食。</p>
+  </section>
+</main>
+
+<footer>
+  店家資料整理自 2025–2026 年公開美食報導與米其林必比登名單；價位為約略估計，地圖標記為大略位置，營業時間與確切位置請以導航與店家公告為準。<br>
+  地圖：© OpenStreetMap contributors © CARTO｜Vibe Coding 作業
+</footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+"use strict";
+/* =========================================================
+   1. 常數與內建資料
+   新增店家只要在 STORES 多加一行：
+   [店名, 類型, 價位(1-3), 行政區, 推薦語, 地址, 緯度, 經度]
+   ========================================================= */
+const TYPES = ["小吃","飯麵","早餐","火鍋","甜點飲料","異國"];
+const TYPE_LABEL = {"小吃":"小吃","飯麵":"飯麵","早餐":"早餐","火鍋":"火鍋","甜點飲料":"甜點/飲料","異國":"異國料理"};
+const PRICES = [1,2,3];
+const PRICE_LABEL = {1:"$ ≤150",2:"$$ 150–400",3:"$$$ 400+"};
+const PRICE_SHORT = {1:"$",2:"$$",3:"$$$"};
+const DISTRICTS = ["鹽埕","新興前金","苓雅","三民","左營","鼓山"];
+const CUSTOM_DISTRICTS = [...DISTRICTS,"其他"];
+const DISTRICT_LABEL = {"鹽埕":"鹽埕","新興前金":"新興/前金","苓雅":"苓雅","三民":"三民","左營":"左營","鼓山":"鼓山","其他":"其他區"};
+const DISTANCES = [0,1,3,5];             // 0 = 不限
+const KH_STATION = {lat:22.6394,lng:120.3022};
+const FAR_KM = 50;
+const MAX_SLICES = 12;
+const STORAGE_KEY = "khfood.custom.v1";
+
+const STORES_RAW = [
+  // ---- 鹽埕 ----
+  ["鴨肉珍","飯麵",1,"鹽埕","鹽埕排隊老店，鴨肉飯配一碗下水湯","高雄市鹽埕區五福四路258號",22.6246,120.2845],
+  ["北港蔡三代筒仔米糕","小吃",1,"鹽埕","必比登推介，筒仔米糕淋上甜辣醬","高雄市鹽埕區河西路167號",22.6262,120.2879],
+  ["尚芳土魠魚羹","小吃",1,"鹽埕","酥炸土魠魚塊配上酸甜羹湯","高雄市鹽埕區富野路72號",22.6262,120.2851],
+  ["大溝頂虱目魚米粉湯","早餐",1,"鹽埕","一早就開，虱目魚米粉湯清甜暖胃","高雄市鹽埕區新樂街198-38號",22.6251,120.2839],
+  ["婆婆冰","甜點飲料",1,"鹽埕","港都老字號冰店，草莓牛奶冰必點","高雄市鹽埕區七賢三路135號",22.6273,120.2846],
+  ["香茗茶行","甜點飲料",1,"鹽埕","在地人從小喝到大的鮮奶茶","高雄市鹽埕區五福四路264號",22.6245,120.2842],
+  ["汕頭天天沙茶火鍋","火鍋",2,"鹽埕","老派沙茶火鍋，湯頭香氣十足","高雄市鹽埕區七賢三路240號",22.6270,120.2815],
+  ["泰法客泰味小食光","異國",2,"鹽埕","鹽埕巷弄裡的平價泰式料理","高雄市鹽埕區五福四路129之1號",22.6250,120.2866],
+  ["典藏駁二餐廳 ARTCO","異國",3,"鹽埕","駁二倉庫裡的西式餐廳，適合約會","高雄市鹽埕區大義街2號",22.6203,120.2815],
+  // ---- 鼓山 ----
+  ["渡船頭海之冰","甜點飲料",1,"鼓山","超大份量剉冰，揪團來吃最划算","高雄市鼓山區濱海一路76號",22.6206,120.2703],
+  ["哈瑪星黑旗魚丸大王","小吃",1,"鼓山","綜合魚丸湯配一碗肉燥飯","高雄市鼓山區鼓波街27-7號",22.6223,120.2738],
+  ["哈瑪星呂汕頭麵","飯麵",1,"鼓山","銅板價汕頭乾麵，加點滷味小菜","高雄市鼓山區鼓波街27-16號",22.6225,120.2736],
+  ["哈瑪星碗粿枝","小吃",1,"鼓山","代天宮旁的古早味碗粿","高雄市鼓山區鼓元街59號",22.6219,120.2745],
+  ["萬全肉圓米糕","小吃",1,"鼓山","肉圓、米糕、特製豆乾一次吃","高雄市鼓山區臨海一路1號",22.6231,120.2760],
+  ["愛買漢堡店","早餐",1,"鼓山","哈瑪星老早餐店，花生厚片超香","高雄市鼓山區鼓元街68號",22.6221,120.2748],
+  ["碼頭阿姨蛋餅","早餐",1,"鼓山","銅板蛋餅，西子灣散步前先吃","高雄市鼓山區鼓山一路5號之1",22.6229,120.2754],
+  ["舞古賀鍋物專賣店","火鍋",2,"鼓山","昆布、麻辣湯底任選，也有和牛套餐","高雄市鼓山區華榮路50號",22.6620,120.2945],
+  ["賣塩順台菜","飯麵",3,"鼓山","必比登推介的台菜館，適合家庭聚餐","高雄市鼓山區青海路173號",22.6596,120.2928],
+  ["a little more 多一點咖啡","甜點飲料",2,"鼓山","美術館旁的早午餐咖啡廳","高雄市鼓山區美術館路85號",22.6555,120.2860],
+  // ---- 新興 / 前金 ----
+  ["興隆居","早餐",1,"新興前金","湯包、燒餅油條，高雄早餐代表","高雄市前金區六合二路186號",22.6316,120.2955],
+  ["老江紅茶牛奶","早餐",1,"新興前金","紅茶牛奶配火腿蛋土司，宵夜也行","高雄市新興區南台路51號",22.6270,120.3025],
+  ["包子叔叔","早餐",1,"新興前金","小籠包、燒賣、水晶餃現蒸","高雄市前金區大同二路54-2號",22.6268,120.2972],
+  ["前金肉燥飯","飯麵",1,"新興前金","必比登推介，肉燥飯配滷蛋","高雄市前金區大同二路26號",22.6266,120.2962],
+  ["春蘭割包","小吃",1,"新興前金","必比登推介，割包配四神湯","高雄市新興區復興一路5號",22.6305,120.3060],
+  ["米院子油飯","小吃",1,"新興前金","必比登推介，粒粒分明的油飯","高雄市新興區南海街30號",22.6310,120.3045],
+  ["牛老大涮牛肉","火鍋",2,"新興前金","溫體牛涮鍋，必比登推介","高雄市前金區自強二路18號",22.6300,120.2968],
+  ["汕頭泉成沙茶火鍋","火鍋",2,"新興前金","高雄沙茶火鍋老字號","高雄市新興區中山橫路7號",22.6245,120.3008],
+  ["昭明海產家庭料理","飯麵",3,"新興前金","必比登推介的海產家常菜","高雄市前金區自強一路53號",22.6235,120.2970],
+  ["花葵壽喜","異國",3,"新興前金","日式壽喜燒，慶祝日的好選擇","高雄市前金區自強一路96巷28號",22.6225,120.2975],
+  // ---- 苓雅 ----
+  ["泰元","異國",2,"苓雅","必比登推介的泰式料理","高雄市苓雅區苓雅二路53號",22.6215,120.3125],
+  ["菜粽李","早餐",1,"苓雅","必比登推介，菜粽配味噌湯","高雄市苓雅區成功一路159號",22.6150,120.2998],
+  ["苓雅油煎肉圓","小吃",1,"苓雅","油煎肉圓外酥內Q，配四神湯","高雄市苓雅區文武三街55號",22.6268,120.3075],
+  ["全旺蔥餅條","小吃",1,"苓雅","手工限量蔥餅條，配麵線糊","高雄市苓雅區苓雅二路101號",22.6228,120.3125],
+  ["春焰老潼關肉夾饃","小吃",1,"苓雅","老滷肉、孜然羊肉夾饃","高雄市苓雅區苓雅二路167號",22.6245,120.3125],
+  ["洪記煎餅果子","小吃",1,"苓雅","台式口味的天津煎餅果子","高雄市苓雅區自強三路158號",22.6160,120.2985],
+  ["九記食糖水","甜點飲料",1,"苓雅","港式糖水，芝麻杏仁糊","高雄市苓雅區林南街4號",22.6222,120.3030],
+  ["有福記麻糬","甜點飲料",1,"苓雅","攤車手工麻糬，一顆銅板價","高雄市苓雅區福德三路202號",22.6200,120.3260],
+  ["寒軒觀海軒","異國",3,"苓雅","40 樓港式飲茶，邊吃邊看港景","高雄市苓雅區四維三路33號40樓",22.6198,120.3030],
+  // ---- 三民 ----
+  ["侯記鴨肉飯","飯麵",1,"三民","必比登推介，鴨肉飯配鴨肉冬粉","高雄市三民區自強一路201號",22.6385,120.2985],
+  ["良佳豬腳","飯麵",2,"三民","必比登推介的滷豬腳","高雄市三民區陽明路229號",22.6420,120.3210],
+  ["張記排骨酥","小吃",1,"三民","排骨酥湯配米糕、肉燥飯","高雄市三民區哈爾濱街99號",22.6405,120.2925],
+  ["許記蒸餃","飯麵",1,"三民","一籠十顆的手工蒸餃","高雄市三民區林森一路306號",22.6365,120.3035],
+  ["許香香八寶冰","甜點飲料",1,"三民","吉林夜市裡料多實在的八寶冰","高雄市三民區吉林街167號",22.6435,120.3065],
+  ["SARU麵屋猿","異國",2,"三民","日式拉麵，加麵只要 10 元","高雄市三民區自由一路237號",22.6455,120.3088],
+  ["東洋禾食","異國",2,"三民","巷弄日式居酒屋","高雄市三民區鼎山街693巷20號",22.6550,120.3240],
+  ["十三巷手作壽司","異國",2,"三民","手作握壽司與丼飯","高雄市三民區天民路66號",22.6555,120.3155],
+  // ---- 左營 ----
+  ["弘記肉燥飯舖","飯麵",1,"左營","必比登推介，肉燥飯配魚皮湯","高雄市左營區立文路96號",22.6690,120.3010],
+  ["正宗鴨肉飯","飯麵",1,"左營","瑞豐商圈附近的鴨肉飯","高雄市左營區裕誠路245號",22.6670,120.3015],
+  ["榮園餡餅粥","飯麵",1,"左營","眷村味餡餅配小米粥","高雄市左營區左營大路615號",22.6815,120.2880],
+  ["李天生古早味香腸","小吃",1,"左營","左營老街的古早味香腸","高雄市左營區左營大路361巷1弄2號",22.6775,120.2890],
+  ["蛋餅王","早餐",1,"左營","酥脆手工蛋餅","高雄市左營區左營大路240號",22.6755,120.2905],
+  ["寬來順早餐店","早餐",1,"左營","眷村早餐，燒餅、韭菜盒","高雄市左營區中華一路5-14號",22.6835,120.2945],
+  ["湯旺麻辣回轉火鍋","火鍋",2,"左營","一人一鍋的回轉火鍋","高雄市左營區明誠二路477號",22.6615,120.3015],
+  ["左營劉家酸白菜火鍋","火鍋",3,"左營","中正堂旁的酸白菜白肉鍋老店","高雄市左營區介壽路9號",22.6820,120.2860],
+  ["高雄聯上大飯店自助餐","異國",3,"左營","中西日式自助百匯，吃到飽","高雄市左營區裕誠路486號",22.6660,120.3045],
+];
+const BUILTIN = STORES_RAW.map((r,i)=>({
+  id:"b"+i, name:r[0], type:r[1], price:r[2], district:r[3], note:r[4], addr:r[5], lat:r[6], lng:r[7], custom:false
+}));
+
+/* =========================================================
+   2. 狀態
+   ========================================================= */
+const state = {
+  filters:{type:new Set(), price:new Set(), district:new Set(), distance:0},
+  excluded:new Set(),
+  custom:[],
+  storageOK:true,
+  me:null,              // {lat,lng,simulated}
+  wheelStores:[],
+  poolKey:"",
+  rotation:0,
+  spinning:false,
+  current:null,
+  picking:false,
+  pickLatLng:null,
+};
+
+/* =========================================================
+   3. 工具函式
+   ========================================================= */
+const $ = id => document.getElementById(id);
+const allStores = () => BUILTIN.concat(state.custom);
+function haversineKm(a,b){
+  const R=6371, toRad=d=>d*Math.PI/180;
+  const dLat=toRad(b.lat-a.lat), dLng=toRad(b.lng-a.lng);
+  const h=Math.sin(dLat/2)**2+Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+function distOf(s){ return state.me ? haversineKm(state.me,s) : null; }
+function fmtKm(km){ return km<1 ? Math.round(km*1000)+" 公尺" : km.toFixed(1)+" 公里"; }
+function shuffle(arr){ const a=arr.slice(); for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];} return a; }
+function escapeHTML(s){ return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function displayName(s){ return (s.custom?"⭐ ":"")+s.name; }
+function navUrl(s){
+  const dest = s.custom ? `${s.lat},${s.lng}` : `${s.name} ${s.addr}`;
+  return "https://www.google.com/maps/dir/?api=1&destination="+encodeURIComponent(dest);
+}
+function distanceActive(){ return !!state.me && state.filters.distance>0; }
+
+/* =========================================================
+   4. 篩選：同類 OR、不同類 AND、沒勾 = 全部
+   ========================================================= */
+function matchesFilters(s){
+  const f=state.filters;
+  if(f.type.size && !f.type.has(s.type)) return false;
+  if(f.price.size && !f.price.has(s.price)) return false;
+  if(f.district.size && !f.district.has(s.district)) return false;
+  if(distanceActive() && distOf(s) > f.distance) return false;
+  return true;
+}
+function filteredStores(){ return allStores().filter(s=>matchesFilters(s) && !state.excluded.has(s.id)); }
+
+/* =========================================================
+   5. 篩選 UI
+   ========================================================= */
+function makeChips(container, values, labelMap, set, multi=true){
+  container.innerHTML="";
+  values.forEach(v=>{
+    const lab=document.createElement("label"); lab.className="chip";
+    const inp=document.createElement("input");
+    inp.type= multi ? "checkbox" : "radio";
+    inp.name = container.id; inp.value=v;
+    if(!multi) inp.checked = (state.filters.distance===v);
+    inp.addEventListener("change",()=>{
+      if(multi){ inp.checked ? set.add(v) : set.delete(v); }
+      else { state.filters.distance = v; }
+      refresh({refit:true});
+    });
+    const sp=document.createElement("span"); sp.textContent=labelMap[v];
+    lab.append(inp,sp); container.append(lab);
+  });
+}
+function buildFilters(){
+  makeChips($("fType"),TYPES,TYPE_LABEL,state.filters.type);
+  makeChips($("fPrice"),PRICES,PRICE_LABEL,state.filters.price);
+  makeChips($("fDistrict"),DISTRICTS.concat(state.custom.some(s=>s.district==="其他")?["其他"]:[]),DISTRICT_LABEL,state.filters.district);
+  makeChips($("fDistance"),DISTANCES,{0:"不限",1:"1 公里內",3:"3 公里內",5:"5 公里內"},null,false);
+}
+$("btnClearFilters").addEventListener("click",()=>{
+  state.filters.type.clear(); state.filters.price.clear(); state.filters.district.clear(); state.filters.distance=0;
+  buildFilters(); refresh({refit:true});
+});
+
+/* =========================================================
+   6. 轉盤
+   ========================================================= */
+const canvas=$("wheel"), ctx=canvas.getContext("2d");
+const SLICE_COLORS=["#ff3b5c","#ff8a1f","#ffd23f","#2de2e6","#ff4fd8","#8c5bff"];
+const SLICE_TEXT  =["#fff","#2a1100","#2a1d00","#032628","#fff","#fff"];
+
+function updateWheelStores(force=false){
+  const pool=filteredStores();
+  const key=pool.map(s=>s.id).sort().join(",");
+  if(!force && key===state.poolKey) return;
+  state.poolKey=key;
+  state.wheelStores = pool.length>MAX_SLICES ? shuffle(pool).slice(0,MAX_SLICES) : pool;
+  state.rotation = state.rotation % 360;          // 新的一批從目前角度開始，避免數字無限變大
+  canvas.style.transition="none";
+  canvas.style.transform=`rotate(${state.rotation}deg)`;
+}
+function shortName(n,max){ return n.length>max ? n.slice(0,max-1)+"…" : n; }
+function drawWheel(){
+  const W=canvas.width, c=W/2, r=c-4, list=state.wheelStores, n=list.length;
+  ctx.clearRect(0,0,W,W);
+  $("wheelWrap").classList.toggle("empty",n===0);
+  if(n===0){
+    ctx.fillStyle="#2a2740"; ctx.beginPath(); ctx.arc(c,c,r,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle="#8d88a8"; ctx.font="bold 34px 'Noto Sans TC',sans-serif"; ctx.textAlign="center";
+    ctx.fillText("沒有符合的店",c,c-70);
+    return;
+  }
+  const seg=Math.PI*2/n;
+  const maxChars = n<=4?9 : n<=8?7 : 6;
+  for(let i=0;i<n;i++){
+    const start=-Math.PI/2+i*seg, end=start+seg, ci=(n%SLICE_COLORS.length===1 && i===n-1 && n>1)? (i+2)%SLICE_COLORS.length : i%SLICE_COLORS.length;
+    ctx.beginPath(); ctx.moveTo(c,c); ctx.arc(c,c,r,start,end); ctx.closePath();
+    ctx.fillStyle= list[i].custom ? "#1fb8bb" : SLICE_COLORS[ci]; ctx.fill();
+    ctx.strokeStyle="#0c0a18"; ctx.lineWidth=3; ctx.stroke();
+    // 文字
+    ctx.save(); ctx.translate(c,c); ctx.rotate(start+seg/2);
+    ctx.textAlign="right"; ctx.textBaseline="middle";
+    ctx.fillStyle= list[i].custom ? "#03282a" : SLICE_TEXT[ci];
+    const fs = n<=6?30 : n<=9?26 : 23;
+    ctx.font=`900 ${fs}px 'Noto Sans TC',sans-serif`;
+    ctx.fillText((list[i].custom?"★":"")+shortName(list[i].name,maxChars), r-18, 0);
+    ctx.restore();
+  }
+}
+function updateWheelInfo(){
+  const total=filteredStores().length, info=$("wheelInfo");
+  info.classList.toggle("warn",total===0);
+  if(total===0) info.textContent="沒有符合的店，放寬條件試試 🙏";
+  else if(total>MAX_SLICES) info.textContent=`符合 ${total} 家，轉盤隨機放上其中 ${MAX_SLICES} 家`;
+  else info.textContent=`轉盤上共有 ${total} 家`;
+  $("btnShuffle").hidden = total<=MAX_SLICES;
+  $("matchCount").textContent=`（符合 ${total} 家）`;
+}
+
+function spin(){
+  if(state.spinning || state.wheelStores.length===0) return;
+  const n=state.wheelStores.length, segDeg=360/n;
+  const idx=Math.floor(Math.random()*n);           // 先決定結果，動畫只是表演
+  const jitter=(Math.random()-0.5)*segDeg*0.7;
+  const target=((-(idx+0.5)*segDeg - jitter) % 360 + 360) % 360;
+  const cur=((state.rotation%360)+360)%360;
+  let delta=target-cur; if(delta<0) delta+=360;
+  const reduce=matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const spins= reduce ? 1 : 5+Math.floor(Math.random()*3);
+  state.rotation += spins*360 + delta;
+  const dur = reduce ? 800 : 4200;
+  setSpinning(true);
+  canvas.style.transition=`transform ${dur}ms cubic-bezier(.12,.8,.12,1)`;
+  canvas.style.transform=`rotate(${state.rotation}deg)`;
+  let done=false;
+  const finish=()=>{ if(done) return; done=true; setSpinning(false); showResult(state.wheelStores[idx]); };
+  canvas.addEventListener("transitionend",finish,{once:true});
+  setTimeout(finish,dur+300);                     // 保險：transitionend 沒觸發也能結束
+}
+function setSpinning(on){
+  state.spinning=on;
+  ["btnSpin","btnShuffle","btnAgain","btnNope","btnRestore","btnAdd","btnLocate","btnSimulate"].forEach(id=>$(id).disabled=on);
+  $("filterFieldset").disabled=on;
+  document.querySelectorAll(".btn-del").forEach(b=>b.disabled=on);
+  $("btnSpin").textContent = on ? "轉轉轉…" : "🎲 轉一下！";
+  if(!on) $("btnSpin").disabled = state.wheelStores.length===0;
+}
+$("btnSpin").addEventListener("click",spin);
+$("btnAgain").addEventListener("click",spin);
+$("btnShuffle").addEventListener("click",()=>{ updateWheelStores(true); drawWheel(); });
+
+/* =========================================================
+   7. 結果卡片
+   ========================================================= */
+function showResult(s){
+  state.current=s;
+  $("resultEmpty").hidden=true; $("resultBody").hidden=false;
+  $("rName").textContent=displayName(s);
+  const tags=[TYPE_LABEL[s.type],DISTRICT_LABEL[s.district]];
+  $("rTags").innerHTML = tags.map(t=>`<span class="tag">${escapeHTML(t)}</span>`).join("")
+    + `<span class="tag price">${PRICE_SHORT[s.price]}</span>`
+    + (state.me ? `<span class="tag dist">📍 距離${state.me.simulated?"高雄車站":"你"} ${fmtKm(distOf(s))}</span>` : "");
+  $("rNote").textContent = s.note || "（沒有留下推薦語）";
+  $("rAddr").textContent = s.addr || `自訂位置（${s.lat.toFixed(5)}, ${s.lng.toFixed(5)}）`;
+  $("rNav").href=navUrl(s);
+  const p=$("resultPanel"); p.classList.remove("pop"); void p.offsetWidth; p.classList.add("pop");
+  focusOnMap(s);
+  if(window.innerWidth<900) p.scrollIntoView({behavior:"smooth",block:"start"});
+}
+function clearResultIfGone(){
+  if(state.current && !allStores().some(s=>s.id===state.current.id)){
+    state.current=null; $("resultBody").hidden=true; $("resultEmpty").hidden=false;
+  }
+}
+$("btnNope").addEventListener("click",()=>{
+  if(!state.current) return;
+  state.excluded.add(state.current.id);
+  refresh({refit:false});
+  if(state.wheelStores.length) spin();
+  else { $("resultBody").hidden=true; $("resultEmpty").hidden=false; $("resultEmpty").textContent="都排除光了！按「點此還原」或放寬篩選條件吧"; state.current=null; }
+});
+$("btnRestore").addEventListener("click",()=>{ state.excluded.clear(); refresh({refit:true}); });
+
+/* =========================================================
+   8. 地圖
+   ========================================================= */
+let map=null, markerLayer=null, markers={}, meMarker=null, pickMarker=null;
+function initMap(){
+  if(typeof L==="undefined"){
+    $("map").innerHTML='<p style="padding:20px;color:#ffd23f">地圖載入失敗（可能是網路問題），轉盤仍可正常使用。</p>';
+    return;
+  }
+  map=L.map("map",{zoomControl:true}).setView([22.640,120.300],13);
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",{
+    maxZoom:19, subdomains:"abcd",
+    attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+  }).addTo(map);
+  markerLayer=L.layerGroup().addTo(map);
+  map.on("click",e=>{ if(state.picking) setPick(e.latlng); });
+}
+function popupHTML(s){
+  const d = state.me ? `<br>📍 ${fmtKm(distOf(s))}` : "";
+  return `<div class="pop-name">${escapeHTML(displayName(s))}</div>
+    <div class="pop-meta">${escapeHTML(TYPE_LABEL[s.type])}｜${PRICE_SHORT[s.price]}｜${escapeHTML(DISTRICT_LABEL[s.district])}${d}</div>
+    ${s.note?`<div class="pop-note">${escapeHTML(s.note)}</div>`:""}
+    ${s.addr?`<div class="pop-meta">${escapeHTML(s.addr)}</div>`:""}
+    <a class="pop-nav" href="${navUrl(s)}" target="_blank" rel="noopener">🧭 Google Maps 導航</a>`;
+}
+function renderMarkers(refit){
+  if(!map) return;
+  markerLayer.clearLayers(); markers={};
+  const list=filteredStores();
+  list.forEach(s=>{
+    const isCur = state.current && state.current.id===s.id;
+    const m=L.circleMarker([s.lat,s.lng],{
+      radius: isCur?11:7, weight:2,
+      color: s.custom ? "#2de2e6" : "#ff8a1f",
+      fillColor: s.custom ? "#2de2e6" : "#ff3b5c",
+      fillOpacity: .85
+    }).bindPopup(popupHTML(s));
+    m.bindTooltip(s.name,{direction:"top",offset:[0,-6]});
+    m.addTo(markerLayer); markers[s.id]=m;
+  });
+  if(refit && list.length){
+    const pts=list.map(s=>[s.lat,s.lng]);
+    if(state.me && distanceActive()) pts.push([state.me.lat,state.me.lng]);
+    map.fitBounds(pts,{padding:[30,30],maxZoom:15});
+  }
+}
+function focusOnMap(s){
+  if(!map) return;
+  renderMarkers(false);
+  map.flyTo([s.lat,s.lng],16,{duration:1.2});
+  const m=markers[s.id];
+  if(m) setTimeout(()=>m.openPopup(),1250);
+}
+function updateMeMarker(){
+  if(!map) return;
+  if(meMarker){ map.removeLayer(meMarker); meMarker=null; }
+  if(!state.me) return;
+  meMarker=L.marker([state.me.lat,state.me.lng],{
+    icon:L.divIcon({className:"",html:'<div class="me-dot"></div>',iconSize:[16,16],iconAnchor:[8,8]}),
+    zIndexOffset:1000
+  }).bindTooltip(state.me.simulated?"模擬位置：高雄車站":"你在這裡",{permanent:false}).addTo(map);
+}
+
+/* =========================================================
+   9. 離我最近（Geolocation）
+   ========================================================= */
+function setLocMsg(text,warn=false){ const m=$("locMsg"); m.textContent=text; m.classList.toggle("warn",warn); }
+function enableDistance(me){
+  state.me=me;
+  $("fDistance").hidden=false;
+  buildFilters();
+  updateMeMarker();
+  refresh({refit:true});
+  if(state.current) showResultSilently();
+}
+function disableDistance(){
+  state.me=null; state.filters.distance=0;
+  $("fDistance").hidden=true;
+  updateMeMarker();
+  refresh({refit:false});
+}
+function showResultSilently(){
+  // 位置改變時更新卡片上的距離，但不重新飛地圖
+  const s=state.current; if(!s) return;
+  const tags=[TYPE_LABEL[s.type],DISTRICT_LABEL[s.district]];
+  $("rTags").innerHTML = tags.map(t=>`<span class="tag">${escapeHTML(t)}</span>`).join("")
+    + `<span class="tag price">${PRICE_SHORT[s.price]}</span>`
+    + (state.me ? `<span class="tag dist">📍 距離${state.me.simulated?"高雄車站":"你"} ${fmtKm(distOf(s))}</span>` : "");
+}
+$("btnLocate").addEventListener("click",()=>{
+  if(!("geolocation" in navigator)){
+    disableDistance(); $("btnSimulate").hidden=false;
+    setLocMsg("你的瀏覽器不支援定位，距離功能已停用。可以改用「模擬我在高雄車站」試玩。",true); return;
+  }
+  setLocMsg("定位中…（請允許瀏覽器取得位置）");
+  $("btnLocate").disabled=true;
+  navigator.geolocation.getCurrentPosition(pos=>{
+    $("btnLocate").disabled=false;
+    const me={lat:pos.coords.latitude,lng:pos.coords.longitude,simulated:false};
+    const far=haversineKm(me,KH_STATION);
+    if(far>FAR_KM){
+      disableDistance(); $("btnSimulate").hidden=false;
+      setLocMsg(`你好像不在高雄（距離高雄車站約 ${Math.round(far)} 公里），距離篩選已停用。`,true);
+    }else{
+      $("btnSimulate").hidden=true;
+      enableDistance(me);
+      setLocMsg("已取得你的位置 ✅ 可以依距離篩選了。");
+    }
+  },err=>{
+    $("btnLocate").disabled=false;
+    disableDistance(); $("btnSimulate").hidden=false;
+    const why = err.code===1 ? "你拒絕了位置授權" : err.code===3 ? "定位逾時" : "目前無法取得位置";
+    setLocMsg(`${why}，距離功能已隱藏。可以改用「模擬我在高雄車站」試玩。`,true);
+  },{enableHighAccuracy:false,timeout:10000,maximumAge:60000});
+});
+$("btnSimulate").addEventListener("click",()=>{
+  enableDistance({...KH_STATION,simulated:true});
+  setLocMsg("目前使用模擬位置：高雄車站 🚉（距離以這裡計算）");
+});
+
+/* =========================================================
+   10. 自訂店家（localStorage）
+   ========================================================= */
+function loadCustom(){
+  try{
+    const raw=localStorage.getItem(STORAGE_KEY);
+    const arr=raw?JSON.parse(raw):[];
+    state.custom = Array.isArray(arr) ? arr.filter(validStoredStore).map(s=>({...s,custom:true})) : [];
+  }catch(e){
+    state.custom=[]; state.storageOK=false;
+  }
+  // 測試是否可寫入
+  try{ localStorage.setItem(STORAGE_KEY+".test","1"); localStorage.removeItem(STORAGE_KEY+".test"); }
+  catch(e){ state.storageOK=false; }
+  if(!state.storageOK){
+    const n=$("storageNote"); n.classList.add("warn");
+    n.textContent="⚠️ 這個瀏覽器無法儲存資料（可能是無痕模式），自訂的店只在這次瀏覽期間有效，重新整理就會消失。";
+  }
+}
+function validStoredStore(s){
+  return s && typeof s.id==="string" && typeof s.name==="string" && s.name.trim() &&
+    TYPES.includes(s.type) && PRICES.includes(s.price) && CUSTOM_DISTRICTS.includes(s.district) &&
+    Number.isFinite(s.lat) && Number.isFinite(s.lng);
+}
+function saveCustom(){
+  if(!state.storageOK) return;
+  try{
+    const data=state.custom.map(({custom,...rest})=>rest);
+    localStorage.setItem(STORAGE_KEY,JSON.stringify(data));
+  }catch(e){
+    state.storageOK=false;
+    const n=$("storageNote"); n.classList.add("warn");
+    n.textContent="⚠️ 儲存失敗，自訂的店只在這次瀏覽期間有效。";
+  }
+}
+function renderMine(){
+  const ul=$("mineList"); ul.innerHTML="";
+  $("mineEmpty").hidden = state.custom.length>0;
+  state.custom.forEach(s=>{
+    const li=document.createElement("li");
+    li.innerHTML=`<div><div>⭐ ${escapeHTML(s.name)}</div><div class="meta">${escapeHTML(TYPE_LABEL[s.type])}｜${PRICE_SHORT[s.price]}｜${escapeHTML(DISTRICT_LABEL[s.district])}</div></div>`;
+    const del=document.createElement("button"); del.type="button"; del.className="btn-del"; del.textContent="刪除";
+    del.disabled=state.spinning;
+    del.addEventListener("click",()=>{
+      if(!confirm(`確定要刪除「${s.name}」嗎？`)) return;
+      state.custom=state.custom.filter(x=>x.id!==s.id);
+      state.excluded.delete(s.id);
+      saveCustom(); clearResultIfGone(); buildFilters(); renderMine(); refresh({refit:false});
+    });
+    li.append(del); ul.append(li);
+  });
+}
+function fillSelect(sel,values,labels){
+  sel.innerHTML='<option value="">請選擇</option>'+values.map(v=>`<option value="${v}">${escapeHTML(labels[v])}</option>`).join("");
+}
+fillSelect($("inType"),TYPES,TYPE_LABEL);
+fillSelect($("inPrice"),PRICES,PRICE_LABEL);
+fillSelect($("inDistrict"),CUSTOM_DISTRICTS,DISTRICT_LABEL);
+
+function startPick(){
+  if(state.spinning) return;
+  if(!map){ alert("地圖沒有載入成功，暫時無法新增店家。"); return; }
+  state.picking=true;
+  $("mapPanel").classList.add("picking"); $("mapBanner").hidden=false;
+  $("addForm").hidden=false; $("btnAdd").hidden=true; $("formError").textContent="";
+  if(window.innerWidth<900) $("mapPanel").scrollIntoView({behavior:"smooth",block:"start"});
+}
+function stopPick(){
+  state.picking=false; $("mapPanel").classList.remove("picking"); $("mapBanner").hidden=true;
+}
+function setPick(latlng){
+  state.pickLatLng={lat:+latlng.lat.toFixed(6),lng:+latlng.lng.toFixed(6)};
+  if(pickMarker) map.removeLayer(pickMarker);
+  pickMarker=L.circleMarker(latlng,{radius:10,color:"#fff",weight:3,fillColor:"#2de2e6",fillOpacity:1}).addTo(map);
+  stopPick();
+  const ps=$("pickStatus"); ps.className="pick-status ok";
+  ps.innerHTML=`✅ 已選位置（${state.pickLatLng.lat.toFixed(4)}, ${state.pickLatLng.lng.toFixed(4)}）<button type="button" class="link-btn" id="btnRepick">重新選位置</button>`;
+  $("btnRepick").addEventListener("click",()=>{ startPick(); });
+  // 自動猜行政區：找最近的內建店家
+  if(!$("inDistrict").value){
+    let best=null,bd=Infinity;
+    BUILTIN.forEach(s=>{const d=haversineKm(state.pickLatLng,s); if(d<bd){bd=d;best=s;}});
+    $("inDistrict").value = (best && bd<2) ? best.district : "其他";
+  }
+  if(window.innerWidth<900) $("addForm").scrollIntoView({behavior:"smooth",block:"center"});
+  $("inName").focus({preventScroll:true});
+}
+function resetForm(){
+  $("addForm").reset(); $("addForm").hidden=true; $("btnAdd").hidden=false;
+  state.pickLatLng=null; if(pickMarker&&map){ map.removeLayer(pickMarker); pickMarker=null; }
+  const ps=$("pickStatus"); ps.className="pick-status no"; ps.textContent="尚未選擇位置";
+  $("formError").textContent=""; stopPick();
+}
+$("btnAdd").addEventListener("click",startPick);
+$("btnCancelPick").addEventListener("click",()=>{ if(!state.pickLatLng) resetForm(); else stopPick(); });
+$("btnFormCancel").addEventListener("click",resetForm);
+$("addForm").addEventListener("submit",e=>{
+  e.preventDefault();
+  const name=$("inName").value.trim(), type=$("inType").value, price=+$("inPrice").value,
+        district=$("inDistrict").value, note=$("inNote").value.trim();
+  const err=msg=>{ $("formError").textContent=msg; };
+  if(!state.pickLatLng) return err("請先在地圖上點一下，選擇店家位置。");
+  if(!name) return err("請輸入店名。");
+  if(name.length>20) return err("店名最多 20 個字。");
+  if(allStores().some(s=>s.name.trim().toLowerCase()===name.toLowerCase())) return err(`已經有一家叫「${name}」的店了，換個名字吧。`);
+  if(!type) return err("請選擇類型。");
+  if(!price) return err("請選擇價位。");
+  if(!district) return err("請選擇行政區。");
+  const s={id:"c"+Date.now().toString(36)+Math.random().toString(36).slice(2,6), name, type, price, district, note, addr:"",
+           lat:state.pickLatLng.lat, lng:state.pickLatLng.lng, custom:true};
+  state.custom.push(s); saveCustom();
+  resetForm(); buildFilters(); renderMine(); refresh({refit:false});
+  if(map) map.flyTo([s.lat,s.lng],16,{duration:.8});
+});
+
+/* =========================================================
+   11. 整體刷新
+   ========================================================= */
+function refresh({refit=false}={}){
+  updateWheelStores();
+  drawWheel();
+  updateWheelInfo();
+  const ex=state.excluded.size;
+  $("excludedBar").hidden = ex===0; $("excludedCount").textContent=ex;
+  $("btnSpin").disabled = state.spinning || state.wheelStores.length===0;
+  renderMarkers(refit);
+}
+
+/* =========================================================
+   12. 啟動
+   ========================================================= */
+loadCustom();
+buildFilters();
+renderMine();
+initMap();
+if(window.innerWidth<600) $("filtersPanel").open=false;
+refresh({refit:true});
+// 字型載入後重畫，避免轉盤文字用到備用字型
+if(document.fonts && document.fonts.ready) document.fonts.ready.then(drawWheel);
+</script>
+</body>
+</html>
